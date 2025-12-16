@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import numpy as np #noqa
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -8,9 +8,11 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.metrics import accuracy_score, classification_report
 
-# Konfigurasi Halaman
+# ==========================================
+# KONFIGURASI HALAMAN
+# ==========================================
 st.set_page_config(page_title="Analisis Data Siswa", layout="wide")
 
 st.title("Dashboard Analisis & Prediksi Stres Siswa")
@@ -19,11 +21,13 @@ Aplikasi ini menampilkan alur pemrosesan data setahap demi setahap:
 1. **Raw Data**: Melihat data asli.
 2. **Preprocessing**: Pembersihan dan transformasi data.
 3. **Clustering**: Pengelompokan siswa berdasarkan pola jawaban.
-4. **Logistic Regression**: Evaluasi model.
-5. **Simulasi Prediksi**: Coba prediksi data baru!
+4. **Logistic Regression**: Evaluasi model prediksi.
+5. **Simulasi Prediksi**: Coba prediksi data baru (Real-time).
 """)
 
-# --- BAGIAN 1: LOAD RAW DATA ---
+# ==========================================
+# 1. LOAD RAW DATA
+# ==========================================
 st.header("1. Raw Data (Data Mentah)")
 uploaded_file = 'responses.csv' 
 
@@ -40,156 +44,201 @@ if df is None:
     st.error("File 'responses.csv' tidak ditemukan! Pastikan file ada di folder yang sama.")
     st.stop()
 
-st.write("Menampilkan 5 baris pertama dari data mentah:")
-st.dataframe(df.head())
+with st.expander("Tampilkan Data Mentah"):
+    st.dataframe(df.head())
 
-# --- BAGIAN 2: DATA CLEANING & PREPROCESSING ---
+# ==========================================
+# 2. DATA CLEANING & PREPROCESSING
+# ==========================================
 st.header("2. Data Cleaning & Preprocessing")
 
 # 2.1 Handling Missing Values
 df_clean = df.copy()
-df_clean = df_clean.drop(columns=['State'])
+# Drop kolom State sesuai rencana
+if 'State' in df_clean.columns:
+    df_clean = df_clean.drop(columns=['State'])
+
+# Isi missing value Gender
 gender_mode = df_clean['Gender'].mode()[0]
 df_clean['Gender'] = df_clean['Gender'].fillna(gender_mode)
 
-# 2.2 Encoding (DIPERBARUI UNTUK PREDIKSI)
-st.subheader("2.2 Encoding & Scaling")
-st.write("Mengubah data teks menjadi angka dan menormalisasi skala data.")
+st.write("✅ Missing Values handled & Column 'State' dropped.")
 
-# Kita simpan encoder dalam dictionary agar bisa dipakai ulang saat Prediksi nanti
+# 2.2 Encoding
+st.subheader("2.2 Encoding (Text to Number)")
+
+# Dictionary untuk menyimpan encoder agar bisa dipakai di prediksi nanti
 encoders = {} 
 categorical_cols = ['Category', 'Country', 'Gender', 'Before-Environment', 'Now-Environment']
+
+# Kita buat dataframe baru khusus angka (df_encoded)
 df_encoded = df_clean.copy()
 
 for col in categorical_cols:
     le = LabelEncoder()
-    # Fit pada data asli agar mapping tersimpan (misal: Male=1, Female=0)
     df_encoded[col] = le.fit_transform(df_encoded[col])
-    encoders[col] = le # Simpan encoder ini
+    encoders[col] = le # Simpan encoder
 
-st.write("Data telah di-encode.")
+st.write("Contoh data setelah Encoding:")
+st.dataframe(df_encoded.head(3))
 
-# 2.3 Scaling
+# [TAMBAHAN] Tombol untuk menyimpan/download data bersih
+csv_download = df_encoded.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="📥 Download Data Hasil Cleaning (CSV)",
+    data=csv_download,
+    file_name="data_cleaned_encoded.csv",
+    mime="text/csv",
+)
+
+# 2.3 Scaling (Khusus untuk Clustering)
 scaler = StandardScaler()
 numerical_cols = ['Age', 'Before-ClassworkStress', 'Before-HomeworkStress', 'Before-HomeworkHours',
                   'Now-ClassworkStress', 'Now-HomeworkStress', 'Now-HomeworkHours',
                   'FamilyRelationships', 'FriendRelationships']
 
+# Kita scale hanya kolom numerik
 df_scaled = df_encoded.copy()
 df_scaled[numerical_cols] = scaler.fit_transform(df_scaled[numerical_cols])
 
-st.dataframe(df_scaled.head(3))
-
-# --- BAGIAN 3: CLUSTERING ---
+# ==========================================
+# 3. CLUSTERING (K-MEANS)
+# ==========================================
 st.header("3. Clustering (K-Means)")
-k = st.slider("Pilih Jumlah Cluster (K):", 2, 5, 3)
-kmeans = KMeans(n_clusters=k, random_state=42)
-clusters = kmeans.fit_predict(df_scaled)
+st.caption("Eksperimen dengan jumlah cluster untuk melihat pola pengelompokan siswa.")
 
-df_result_cluster = df.copy()
-df_result_cluster['Cluster'] = clusters
+col_k, col_viz = st.columns([1, 3])
 
-pca = PCA(n_components=2)
-pca_comp = pca.fit_transform(df_scaled)
-df_result_cluster['PCA1'] = pca_comp[:, 0]
-df_result_cluster['PCA2'] = pca_comp[:, 1]
+with col_k:
+    k = st.slider("Pilih Jumlah Cluster (K):", 2, 5, 3)
+    
+    # Menjalankan K-Means
+    # Kita drop target prediksi dari data clustering agar fair (opsional, tapi disarankan)
+    X_cluster = df_scaled.drop(columns=['Now-ClassworkStress']) if 'Now-ClassworkStress' in df_scaled.columns else df_scaled
+    
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    clusters = kmeans.fit_predict(X_cluster)
+    
+    # Tambahkan label ke dataframe hasil
+    df_result_cluster = df.copy()
+    df_result_cluster['Cluster'] = clusters
 
-c1, c2 = st.columns([2, 1])
-with c1:
+with col_viz:
+    # PCA untuk visualisasi 2D
+    pca = PCA(n_components=2)
+    pca_comp = pca.fit_transform(X_cluster)
+    df_result_cluster['PCA1'] = pca_comp[:, 0]
+    df_result_cluster['PCA2'] = pca_comp[:, 1]
+    
     fig, ax = plt.subplots(figsize=(8, 4))
     sns.scatterplot(data=df_result_cluster, x='PCA1', y='PCA2', hue='Cluster', palette='viridis', s=100, ax=ax)
+    plt.title(f"Visualisasi {k} Cluster Siswa")
     st.pyplot(fig)
-with c2:
-    st.write("Rata-rata fitur per cluster:")
-    st.dataframe(df_result_cluster.groupby('Cluster')[['Age', 'Now-ClassworkStress']].mean())
 
-# --- BAGIAN 4: LOGISTIC REGRESSION (TRAINING) ---
+st.write("**Statistik Rata-rata per Cluster:**")
+st.dataframe(df_result_cluster.groupby('Cluster')[['Age', 'Now-ClassworkStress', 'FamilyRelationships']].mean())
+
+# ==========================================
+# 4. LOGISTIC REGRESSION (TRAINING)
+# ==========================================
 st.header("4. Logistic Regression Evaluation")
 
-# Persiapan Data
-X = df_encoded.drop(columns=['Now-ClassworkStress'])
+# 4.1 Definisi Target & Fitur
+# Target: Apakah Now-ClassworkStress >= 4? (1 = Ya, 0 = Tidak)
 y = df_encoded['Now-ClassworkStress'].apply(lambda x: 1 if x >= 4 else 0)
 
-# Split Data
+# Fitur: Semua kolom kecuali target
+X = df_encoded.drop(columns=['Now-ClassworkStress'])
+
+# 4.2 Split Data
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Training Model (Otomatis dijalankan agar siap untuk prediksi)
+# 4.3 Training
 model = LogisticRegression(max_iter=2000)
 model.fit(X_train, y_train)
+
+# 4.4 Evaluasi
 y_pred = model.predict(X_test)
 acc = accuracy_score(y_test, y_pred)
 
-st.write(f"Model telah dilatih dengan **Akurasi: {acc:.2%}**")
-st.write("Classification Report:")
-st.text(classification_report(y_test, y_pred))
+st.success(f"Model berhasil dilatih! **Akurasi: {acc:.2%}**")
 
-# --- BAGIAN 5: PREDIKSI (SIMULASI) ---
+with st.expander("Lihat Classification Report"):
+    report = classification_report(y_test, y_pred, output_dict=True)
+    st.dataframe(pd.DataFrame(report).transpose())
+
+# ==========================================
+# 5. SIMULASI PREDIKSI
+# ==========================================
 st.markdown("---")
 st.header("5. Simulasi Prediksi Stres Siswa")
-st.info("Masukkan data siswa di bawah ini (Sidebar/Form) untuk memprediksi apakah mereka mengalami stres tinggi atau tidak.")
+st.info("Masukkan profil siswa di bawah ini untuk memprediksi potensi Stres Tinggi pada tugas kelas.")
 
-# Layout Input dengan Kolom
-col_input1, col_input2, col_input3 = st.columns(3)
-
-# Dictionary untuk menampung input user
+# Layout Input Form
+col1, col2, col3 = st.columns(3)
 user_input = {}
 
-# --- Kolom 1: Data Profil ---
-with col_input1:
-    st.subheader("Profil Siswa")
-    user_input['Category'] = st.selectbox("Category", options=encoders['Category'].classes_)
-    user_input['Country'] = st.selectbox("Country", options=encoders['Country'].classes_)
-    user_input['Gender'] = st.selectbox("Gender", options=encoders['Gender'].classes_)
-    user_input['Age'] = st.number_input("Age", min_value=10, max_value=30, value=16)
+with col1:
+    st.subheader("Data Diri")
+    # Mengambil opsi dari encoder classes
+    cat_opt = encoders['Category'].classes_
+    count_opt = encoders['Country'].classes_
+    gend_opt = encoders['Gender'].classes_
+    
+    user_input['Category'] = st.selectbox("Category", cat_opt)
+    user_input['Country'] = st.selectbox("Country", count_opt)
+    user_input['Gender'] = st.selectbox("Gender", gend_opt)
+    user_input['Age'] = st.number_input("Age", 10, 30, 20)
 
-# --- Kolom 2: Kondisi Sebelum (Before) ---
-with col_input2:
-    st.subheader("Kondisi Sebelumnya")
-    user_input['Before-Environment'] = st.selectbox("Before Environment", options=encoders['Before-Environment'].classes_)
-    user_input['Before-ClassworkStress'] = st.slider("Before Classwork Stress (1-6)", 1, 6, 3)
-    user_input['Before-HomeworkStress'] = st.slider("Before Homework Stress (1-6)", 1, 6, 3)
-    user_input['Before-HomeworkHours'] = st.number_input("Before Homework Hours", min_value=0.0, value=2.0)
+with col2:
+    st.subheader("Lingkungan Awal")
+    env_bef_opt = encoders['Before-Environment'].classes_
+    user_input['Before-Environment'] = st.selectbox("Before Env.", env_bef_opt)
+    user_input['Before-ClassworkStress'] = st.slider("Before Class Stress", 1, 6, 3)
+    user_input['Before-HomeworkStress'] = st.slider("Before HW Stress", 1, 6, 3)
+    user_input['Before-HomeworkHours'] = st.number_input("Before HW Hours", 0.0, 20.0, 2.0)
 
-# --- Kolom 3: Kondisi Sekarang & Relasi ---
-with col_input3:
-    st.subheader("Kondisi Sekarang & Relasi")
-    user_input['Now-Environment'] = st.selectbox("Now Environment", options=encoders['Now-Environment'].classes_)
-    user_input['Now-HomeworkStress'] = st.slider("Now Homework Stress (1-6)", 1, 6, 3)
-    user_input['Now-HomeworkHours'] = st.number_input("Now Homework Hours", min_value=0.0, value=4.0)
-    user_input['FamilyRelationships'] = st.slider("Family Relationships (-3 s/d 3)", -3, 3, 0)
-    user_input['FriendRelationships'] = st.slider("Friend Relationships (-3 s/d 3)", -3, 3, 0)
+with col3:
+    st.subheader("Lingkungan Sekarang")
+    env_now_opt = encoders['Now-Environment'].classes_
+    user_input['Now-Environment'] = st.selectbox("Now Env.", env_now_opt)
+    # Note: Now-ClassworkStress TIDAK diinput karena itu yang mau diprediksi
+    user_input['Now-HomeworkStress'] = st.slider("Now HW Stress", 1, 6, 3)
+    user_input['Now-HomeworkHours'] = st.number_input("Now HW Hours", 0.0, 20.0, 4.0)
+    user_input['FamilyRelationships'] = st.slider("Family Rel. (-3 to 3)", -3, 3, 0)
+    user_input['FriendRelationships'] = st.slider("Friend Rel. (-3 to 3)", -3, 3, 0)
 
-# Tombol Prediksi
-if st.button("🔍 Prediksi Tingkat Stres"):
-    # 1. Buat DataFrame dari input
+# Tombol Eksekusi
+if st.button("🔍 Analisis Risiko Stres"):
+    # 1. Konversi dictionary ke DataFrame
     input_df = pd.DataFrame([user_input])
-
-    # 2. Lakukan Encoding pada data input (menggunakan encoder yang sudah disimpan tadi)
+    
+    # 2. Encoding Data Input (Penting!)
     try:
-        for col in categorical_cols:
-            input_df[col] = encoders[col].transform(input_df[col])
+        for col, le in encoders.items():
+            if col in input_df.columns:
+                input_df[col] = le.transform(input_df[col])
         
-        # 3. Urutkan kolom agar sesuai dengan X_train
+        # 3. Pastikan urutan kolom SAMA PERSIS dengan X (Training data)
+        # Ini mencegah error jika urutan kolom tertukar
         input_df = input_df[X.columns]
         
         # 4. Prediksi
-        prediction = model.predict(input_df)[0]
-        probability = model.predict_proba(input_df)[0]
-
-        # 5. Tampilkan Hasil
-        st.markdown("---")
-        st.subheader("Hasil Prediksi:")
+        pred_label = model.predict(input_df)[0]
+        pred_prob = model.predict_proba(input_df)[0]
         
-        if prediction == 1:
-            st.error("⚠️ **HIGH STRESS DETECTED**")
-            st.write("Model memprediksi siswa ini mengalami tingkat stres yang tinggi pada tugas kelas.")
-            st.write(f"Confidence (Keyakinan Model): {probability[1]:.2%}")
+        st.markdown("---")
+        if pred_label == 1:
+            st.error("⚠️ **HIGH STRESS RISK DETECTED**")
+            st.write("Siswa ini diprediksi memiliki tingkat stres tinggi (Skor >= 4).")
+            st.progress(int(pred_prob[1]*100))
+            st.caption(f"Confidence Level: {pred_prob[1]:.2%}")
         else:
-            st.success("✅ **LOW STRESS**")
-            st.write("Model memprediksi siswa ini dalam kondisi stres yang wajar/rendah.")
-            st.write(f"Confidence (Keyakinan Model): {probability[0]:.2%}")
+            st.success("✅ **LOW STRESS RISK**")
+            st.write("Siswa ini diprediksi dalam kondisi stabil.")
+            st.progress(int(pred_prob[0]*100))
+            st.caption(f"Confidence Level: {pred_prob[0]:.2%}")
             
     except Exception as e:
-        st.error(f"Terjadi kesalahan saat memproses data: {e}")
-
-st.caption("Prediksi berdasarkan pola data historis siswa.")
+        st.error(f"Terjadi error pada pemrosesan data: {e}")
+        st.warning("Tips: Pastikan semua opsi input dipilih dengan benar.")
