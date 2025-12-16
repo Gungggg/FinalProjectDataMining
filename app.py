@@ -9,7 +9,7 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 # ==========================================
 # KONFIGURASI HALAMAN
@@ -21,7 +21,7 @@ st.markdown("""
 **Tujuan Dashboard:**
 1.  **Clustering**: Mengelompokkan siswa berdasarkan karakteristik.
 2.  **Klasifikasi (Tugas Utama)**: Menggunakan **Logistic Regression**.
-3.  **Eksperimen (Argumentasi)**: Membandingkan dengan **Random Forest** untuk melihat peningkatan performa pada data non-linear.
+3.  **Eksperimen (Argumentasi)**: Membandingkan dengan **Random Forest** + **Confusion Matrix** untuk evaluasi mendalam.
 """)
 
 # ==========================================
@@ -61,7 +61,6 @@ gender_mode = df_clean['Gender'].mode()[0]
 df_clean['Gender'] = df_clean['Gender'].fillna(gender_mode)
 
 # 2.2 Feature Engineering (Membuat Fitur Baru)
-# Fitur ini membantu memberikan 'petunjuk' lebih banyak ke model
 df_clean['Total_Support_System'] = df_clean['FamilyRelationships'] + df_clean['FriendRelationships']
 df_clean['Total_Homework_Stress'] = df_clean['Before-HomeworkStress'] + df_clean['Now-HomeworkStress']
 
@@ -114,18 +113,30 @@ with col_viz:
 # ==========================================
 st.header("4. Klasifikasi & Komparasi Model")
 
+# Fungsi Helper untuk Plot Confusion Matrix
+def plot_confusion_matrix(y_true, y_pred, model_name):
+    cm = confusion_matrix(y_true, y_pred)
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, cbar=False)
+    ax.set_title(f"Confusion Matrix: {model_name}")
+    ax.set_xlabel("Prediksi Model")
+    ax.set_ylabel("Data Asli (Aktual)")
+    ax.set_xticklabels(['Rendah', 'Tinggi'])
+    ax.set_yticklabels(['Rendah', 'Tinggi'])
+    return fig
+
 # Persiapan Data
 y = df_encoded['Now-ClassworkStress'].apply(lambda x: 1 if x >= 4 else 0)
 X = df_encoded.drop(columns=['Now-ClassworkStress'])
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# --- MODEL 1: LOGISTIC REGRESSION (SYARAT TUGAS) ---
+# --- MODEL 1: LOGISTIC REGRESSION ---
 logreg = LogisticRegression(max_iter=2000, random_state=42)
 logreg.fit(X_train, y_train)
 y_pred_lr = logreg.predict(X_test)
 acc_lr = accuracy_score(y_test, y_pred_lr)
 
-# --- MODEL 2: RANDOM FOREST (ARGUMENTASI) ---
+# --- MODEL 2: RANDOM FOREST ---
 rf = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
 rf.fit(X_train, y_train)
 y_pred_rf = rf.predict(X_test)
@@ -137,21 +148,34 @@ col_model1, col_model2 = st.columns(2)
 with col_model1:
     st.subheader("🅰️ Logistic Regression")
     st.metric(label="Akurasi", value=f"{acc_lr:.2%}")
-    st.warning("""
-    **Kelebihan:** Simpel, mudah diinterpretasi.
-    **Kekurangan:** Mengasumsikan hubungan linear. Akurasi sering lebih rendah pada data kompleks.
-    """)
+    st.warning("Model Linear (Sederhana)")
+    
+    # Plot CM LogReg
+    fig_cm_lr = plot_confusion_matrix(y_test, y_pred_lr, "Logistic Regression")
+    st.pyplot(fig_cm_lr)
+    
     with st.expander("Laporan Klasifikasi (LogReg)"):
         st.text(classification_report(y_test, y_pred_lr))
 
 with col_model2:
-    st.subheader("🅱️ Random Forest (Challenger)")
+    st.subheader("🅱️ Random Forest")
     st.metric(label="Akurasi", value=f"{acc_rf:.2%}", delta=f"{(acc_rf - acc_lr):.2%} vs LogReg")
-    st.success("""
-    **Argumentasi:** Model ini menangani hubungan non-linear dan interaksi antar fitur dengan lebih baik (seperti fitur hubungan keluarga & teman).
-    """)
+    st.success("Model Non-Linear (Kompleks)")
+    
+    # Plot CM RF
+    fig_cm_rf = plot_confusion_matrix(y_test, y_pred_rf, "Random Forest")
+    st.pyplot(fig_cm_rf)
+    
     with st.expander("Laporan Klasifikasi (Random Forest)"):
         st.text(classification_report(y_test, y_pred_rf))
+
+st.caption("""
+**Cara Membaca Confusion Matrix:**
+* **Kotak Kiri-Atas (True Negative):** Asli Tidak Stres, Prediksi Tidak Stres (Benar ✅).
+* **Kotak Kanan-Bawah (True Positive):** Asli Stres, Prediksi Stres (Benar ✅).
+* **Kotak Kanan-Atas (False Positive):** Asli Tidak Stres, tapi diprediksi Stres (Salah ❌).
+* **Kotak Kiri-Bawah (False Negative):** Asli Stres, tapi diprediksi Tidak Stres (Salah ❌ - Berbahaya).
+""")
 
 # ==========================================
 # 5. SIMULASI PREDIKSI
@@ -224,9 +248,9 @@ if st.button("🚀 Prediksi Risiko Stres"):
         st.write(f"**Menggunakan Model: {model_choice}**")
         
         if pred == 1:
-            st.error("⚠️ **Stres TINGGI** (Confidence: {prob[1]:.2%})")
+            st.error(f"⚠️ **Stres TINGGI** (Confidence: {prob[1]:.2%})")
         else:
-            st.success("✅ **Stres RENDAH** (Confidence: {prob[0]:.2%})")
+            st.success(f"✅ **Stres RENDAH** (Confidence: {prob[0]:.2%})")
             
     except Exception as e:
         st.error(f"Error: {e}")
