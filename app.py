@@ -9,248 +9,311 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, silhouette_score
 
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Analisis & Komparasi Model", layout="wide")
+st.set_page_config(page_title="Analisis Data Pipeline", layout="wide")
 
-st.title("Dashboard Analisis: Clustering & Komparasi Model")
+st.title("🔬 Dashboard Analisis Data & Pipeline Machine Learning")
 st.markdown("""
-**Tujuan Dashboard:**
-1.  **Clustering**: Mengelompokkan siswa berdasarkan karakteristik.
-2.  **Klasifikasi (Tugas Utama)**: Menggunakan **Logistic Regression**.
-3.  **Eksperimen (Argumentasi)**: Membandingkan dengan **Random Forest** + **Confusion Matrix** untuk evaluasi mendalam.
+Aplikasi ini dirancang untuk menvisualisasikan seluruh proses Data Mining:
+mulai dari **Data Mentah**, **Pembersihan**, **Rekayasa Fitur**, hingga **Evaluasi Model**.
 """)
 
-# ==========================================
-# 1. LOAD DATA
-# ==========================================
-st.header("1. Raw Data")
-uploaded_file = 'responses.csv' 
+# Membuat Tabulasi agar presentasi lebih rapi
+tab1, tab2, tab3, tab4 = st.tabs([
+    " 1. Data Pipeline (Proses)", 
+    " 2. Clustering (K-Means)", 
+    " 3. Komparasi Model", 
+    " 4. Simulasi Prediksi"
+])
 
+# ==========================================
+# LOAD DATA (GLOBAL)
+# ==========================================
 @st.cache_data
 def load_data():
     try:
-        return pd.read_csv(uploaded_file)
+        return pd.read_csv('responses.csv')
     except FileNotFoundError:
         return None
 
-df = load_data()
+df_raw = load_data()
 
-if df is None:
+if df_raw is None:
     st.error("File 'responses.csv' tidak ditemukan!")
     st.stop()
 
-with st.expander("Lihat Data Mentah"):
-    st.dataframe(df.head())
+# ==========================================
+# TAB 1: DATA PIPELINE (DETAIL PROSES)
+# ==========================================
+with tab1:
+    st.header("Alur Pemrosesan Data (Data Pipeline)")
+    
+    # --- STEP 1: RAW DATA ---
+    st.subheader("Langkah 1: Raw Data (Data Mentah)")
+    st.write("Data asli yang dibaca langsung dari file CSV.")
+    st.dataframe(df_raw.head(3))
+    st.caption(f"Dimensi Data Awal: {df_raw.shape[0]} baris, {df_raw.shape[1]} kolom.")
+    
+    st.markdown("---")
+
+    # --- STEP 2: DATA CLEANING ---
+    st.subheader("Langkah 2: Data Cleaning (Pembersihan)")
+    col_clean1, col_clean2 = st.columns(2)
+    
+    with col_clean1:
+        st.markdown("**Masalah pada Raw Data:**")
+        st.write("- Kolom `State` memiliki terlalu banyak variasi (kardinalitas tinggi) dan tidak relevan.")
+        st.write("- Kolom `Gender` memiliki nilai kosong (NaN).")
+        
+    # Proses Cleaning
+    df_clean = df_raw.copy()
+    
+    # 1. Drop State
+    if 'State' in df_clean.columns:
+        df_clean = df_clean.drop(columns=['State'])
+    
+    # 2. Imputasi Missing Value (Gender)
+    gender_mode = df_clean['Gender'].mode()[0]
+    df_clean['Gender'] = df_clean['Gender'].fillna(gender_mode)
+    
+    with col_clean2:
+        st.markdown("**Tindakan Perbaikan:**")
+        st.success("✅ Menghapus kolom `State`.")
+        st.success(f"✅ Mengisi data kosong di `Gender` dengan modus: **'{gender_mode}'**.")
+    
+    with st.expander("Lihat Data Hasil Cleaning"):
+        st.dataframe(df_clean.head(3))
+
+    st.markdown("---")
+
+    # --- STEP 3: FEATURE ENGINEERING ---
+    st.subheader("Langkah 3: Feature Engineering (Rekayasa Fitur)")
+    st.markdown("""
+    Disini kita menciptakan kolom baru untuk menangkap pola yang lebih kuat (karena fitur tunggal korelasinya lemah).
+    """)
+    
+    # Proses Feature Engineering
+    # Gabungan skor hubungan sosial
+    df_clean['Total_Support_System'] = df_clean['FamilyRelationships'] + df_clean['FriendRelationships']
+    # Gabungan skor stres PR
+    df_clean['Total_Homework_Stress'] = df_clean['Before-HomeworkStress'] + df_clean['Now-HomeworkStress']
+    
+    st.code("""
+    # Rumus Fitur Baru:
+    df['Total_Support_System'] = df['FamilyRelationships'] + df['FriendRelationships']
+    df['Total_Homework_Stress'] = df['Before-HomeworkStress'] + df['Now-HomeworkStress']
+    """, language='python')
+    
+    st.write("Contoh hasil penambahan kolom baru:")
+    st.dataframe(df_clean[['FamilyRelationships', 'FriendRelationships', 'Total_Support_System', 'Total_Homework_Stress']].head(3))
+
+    st.markdown("---")
+
+    # --- STEP 4: ENCODING ---
+    st.subheader("Langkah 4: Encoding (Penerjemahan ke Angka)")
+    st.write("Mengubah data teks (Kategori) menjadi angka agar bisa dihitung oleh mesin.")
+    
+    encoders = {} 
+    categorical_cols = ['Category', 'Country', 'Gender', 'Before-Environment', 'Now-Environment']
+    df_encoded = df_clean.copy()
+
+    for col in categorical_cols:
+        le = LabelEncoder()
+        df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
+        encoders[col] = le
+        
+    c1, c2 = st.columns(2)
+    with c1:
+        st.info("Sebelum Encoding (Teks)")
+        st.write(df_clean[categorical_cols].head(3))
+    with c2:
+        st.success("Sesudah Encoding (Angka)")
+        st.write(df_encoded[categorical_cols].head(3))
+    
+    st.write("✅ **Data Pipeline Selesai!** Data ini siap masuk ke tahap Modeling.")
 
 # ==========================================
-# 2. PREPROCESSING & FEATURE ENGINEERING
+# PREPARATION FOR MODELING (BACKEND)
 # ==========================================
-st.header("2. Preprocessing & Feature Engineering")
-
-df_clean = df.copy()
-
-# 2.1 Handling Missing Values & Drop
-if 'State' in df_clean.columns:
-    df_clean = df_clean.drop(columns=['State'])
-
-gender_mode = df_clean['Gender'].mode()[0]
-df_clean['Gender'] = df_clean['Gender'].fillna(gender_mode)
-
-# 2.2 Feature Engineering (Membuat Fitur Baru)
-df_clean['Total_Support_System'] = df_clean['FamilyRelationships'] + df_clean['FriendRelationships']
-df_clean['Total_Homework_Stress'] = df_clean['Before-HomeworkStress'] + df_clean['Now-HomeworkStress']
-
-st.info("✅ Feature Engineering: Menambahkan kolom 'Total_Support_System' dan 'Total_Homework_Stress'.")
-
-# 2.3 Encoding
-encoders = {} 
-categorical_cols = ['Category', 'Country', 'Gender', 'Before-Environment', 'Now-Environment']
-
-df_encoded = df_clean.copy()
-
-for col in categorical_cols:
-    le = LabelEncoder()
-    df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
-    encoders[col] = le
-
-st.write("Data siap digunakan (Encoded).")
-
-# ==========================================
-# 3. CLUSTERING (K-MEANS)
-# ==========================================
-st.header("3. Clustering (K-Means)")
-st.caption("Pengelompokan siswa tanpa label (Unsupervised Learning).")
-
-# Scaling khusus untuk clustering
+# Scaling khusus untuk Clustering (Karena K-Means sensitif terhadap jarak)
 scaler = StandardScaler()
+# Kita pilih fitur numerik + fitur hasil engineering tadi
 num_cols_cluster = ['Age', 'Total_Support_System', 'Total_Homework_Stress', 'Now-HomeworkHours', 'Before-HomeworkHours']
 X_cluster_scaled = scaler.fit_transform(df_encoded[num_cols_cluster])
 
-col_k, col_viz = st.columns([1, 3])
-with col_k:
-    k = st.slider("Jumlah Cluster (K)", 2, 5, 3)
-    kmeans = KMeans(n_clusters=k, random_state=42)
-    clusters = kmeans.fit_predict(X_cluster_scaled)
-
-with col_viz:
-    pca = PCA(n_components=2)
-    pca_res = pca.fit_transform(X_cluster_scaled)
-    df_viz = df.copy()
-    df_viz['Cluster'] = clusters
-    df_viz['PCA1'] = pca_res[:, 0]
-    df_viz['PCA2'] = pca_res[:, 1]
-
-    fig_clust, ax_clust = plt.subplots(figsize=(8, 4))
-    sns.scatterplot(data=df_viz, x='PCA1', y='PCA2', hue='Cluster', palette='viridis', s=100, ax=ax_clust)
-    st.pyplot(fig_clust)
-
-# ==========================================
-# 4. MODELING & COMPARISON (INTI TUGAS)
-# ==========================================
-st.header("4. Klasifikasi & Komparasi Model")
-
-# Fungsi Helper untuk Plot Confusion Matrix
-def plot_confusion_matrix(y_true, y_pred, model_name):
-    cm = confusion_matrix(y_true, y_pred)
-    fig, ax = plt.subplots(figsize=(4, 3))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, cbar=False)
-    ax.set_title(f"Confusion Matrix: {model_name}")
-    ax.set_xlabel("Prediksi Model")
-    ax.set_ylabel("Data Asli (Aktual)")
-    ax.set_xticklabels(['Rendah', 'Tinggi'])
-    ax.set_yticklabels(['Rendah', 'Tinggi'])
-    return fig
-
-# Persiapan Data
+# Split Data untuk Klasifikasi
 y = df_encoded['Now-ClassworkStress'].apply(lambda x: 1 if x >= 4 else 0)
 X = df_encoded.drop(columns=['Now-ClassworkStress'])
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# --- MODEL 1: LOGISTIC REGRESSION ---
-logreg = LogisticRegression(max_iter=2000, random_state=42)
-logreg.fit(X_train, y_train)
-y_pred_lr = logreg.predict(X_test)
-acc_lr = accuracy_score(y_test, y_pred_lr)
-
-# --- MODEL 2: RANDOM FOREST ---
-rf = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
-rf.fit(X_train, y_train)
-y_pred_rf = rf.predict(X_test)
-acc_rf = accuracy_score(y_test, y_pred_rf)
-
-# TAMPILKAN PERBANDINGAN
-col_model1, col_model2 = st.columns(2)
-
-with col_model1:
-    st.subheader("🅰️ Logistic Regression")
-    st.metric(label="Akurasi", value=f"{acc_lr:.2%}")
-    st.warning("Model Linear (Sederhana)")
+# ==========================================
+# TAB 2: CLUSTERING
+# ==========================================
+with tab2:
+    st.header("Analisis Clustering (Unsupervised)")
+    st.write("Mengelompokkan siswa berdasarkan kemiripan karakteristik.")
     
-    # Plot CM LogReg
-    fig_cm_lr = plot_confusion_matrix(y_test, y_pred_lr, "Logistic Regression")
-    st.pyplot(fig_cm_lr)
+    col_k, col_res = st.columns([1, 3])
     
-    with st.expander("Laporan Klasifikasi (LogReg)"):
-        st.text(classification_report(y_test, y_pred_lr))
-
-with col_model2:
-    st.subheader("🅱️ Random Forest")
-    st.metric(label="Akurasi", value=f"{acc_rf:.2%}", delta=f"{(acc_rf - acc_lr):.2%} vs LogReg")
-    st.success("Model Non-Linear (Kompleks)")
-    
-    # Plot CM RF
-    fig_cm_rf = plot_confusion_matrix(y_test, y_pred_rf, "Random Forest")
-    st.pyplot(fig_cm_rf)
-    
-    with st.expander("Laporan Klasifikasi (Random Forest)"):
-        st.text(classification_report(y_test, y_pred_rf))
-
-st.caption("""
-**Cara Membaca Confusion Matrix:**
-* **Kotak Kiri-Atas (True Negative):** Asli Tidak Stres, Prediksi Tidak Stres (Benar ✅).
-* **Kotak Kanan-Bawah (True Positive):** Asli Stres, Prediksi Stres (Benar ✅).
-* **Kotak Kanan-Atas (False Positive):** Asli Tidak Stres, tapi diprediksi Stres (Salah ❌).
-* **Kotak Kiri-Bawah (False Negative):** Asli Stres, tapi diprediksi Tidak Stres (Salah ❌ - Berbahaya).
-""")
+    with col_k:
+        k_val = st.slider("Pilih Jumlah Cluster (K)", 2, 6, 3)
+        
+        # MODEL K-MEANS
+        kmeans = KMeans(n_clusters=k_val, random_state=42)
+        clusters = kmeans.fit_predict(X_cluster_scaled)
+        
+        # METRIC: SILHOUETTE SCORE
+        sil_score = silhouette_score(X_cluster_scaled, clusters)
+        st.metric("Silhouette Score", f"{sil_score:.3f}")
+        
+        if sil_score > 0.5:
+            st.success("Structure: STRONG")
+        elif sil_score > 0.25:
+            st.warning("Structure: MEDIUM")
+        else:
+            st.error("Structure: WEAK")
+            
+    with col_res:
+        # Visualisasi PCA
+        pca = PCA(n_components=2)
+        pca_res = pca.fit_transform(X_cluster_scaled)
+        
+        df_viz = df_encoded.copy()
+        df_viz['Cluster'] = clusters
+        df_viz['PCA1'] = pca_res[:, 0]
+        df_viz['PCA2'] = pca_res[:, 1]
+        
+        fig, ax = plt.subplots(figsize=(8, 4))
+        sns.scatterplot(data=df_viz, x='PCA1', y='PCA2', hue='Cluster', palette='viridis', s=80, ax=ax)
+        plt.title(f"Visualisasi Sebaran Data ({k_val} Cluster)")
+        st.pyplot(fig)
+        
+    st.subheader("Profil Rata-rata per Cluster")
+    st.dataframe(df_viz.groupby('Cluster')[num_cols_cluster].mean())
 
 # ==========================================
-# 5. SIMULASI PREDIKSI
+# TAB 3: KOMPARASI MODEL
 # ==========================================
-st.markdown("---")
-st.header("5. Simulasi Prediksi")
-st.write("Pilih model mana yang ingin digunakan untuk memprediksi data baru.")
-
-# Pilihan Model
-model_choice = st.radio("Pilih Model:", ("Logistic Regression (Standard)", "Random Forest (Optimized)"))
-selected_model = logreg if model_choice == "Logistic Regression (Standard)" else rf
-
-# Form Input
-col1, col2, col3 = st.columns(3)
-inputs = {}
-
-with col1:
-    st.subheader("Profil")
-    inputs['Category'] = st.selectbox("Category", encoders['Category'].classes_)
-    inputs['Country'] = st.selectbox("Country", encoders['Country'].classes_)
-    inputs['Gender'] = st.selectbox("Gender", encoders['Gender'].classes_)
-    inputs['Age'] = st.number_input("Age", 10, 30, 20)
-
-with col2:
-    st.subheader("Masa Lalu")
-    inputs['Before-Environment'] = st.selectbox("Before Env.", encoders['Before-Environment'].classes_)
-    inputs['Before-ClassworkStress'] = st.slider("Before Class Stress", 1, 6, 3)
-    # Simpan ke variabel agar bisa dipakai hitung engineering
-    bf_hw_stress = st.slider("Before HW Stress", 1, 6, 3)
-    inputs['Before-HomeworkStress'] = bf_hw_stress
-    inputs['Before-HomeworkHours'] = st.number_input("Before HW Hours", 0.0, 20.0, 2.0)
-
-with col3:
-    st.subheader("Sekarang")
-    inputs['Now-Environment'] = st.selectbox("Now Env.", encoders['Now-Environment'].classes_)
+with tab3:
+    st.header("Evaluasi & Komparasi Model Klasifikasi")
+    st.write("Target Prediksi: **Apakah Siswa Mengalami Stres Tinggi pada Tugas Kelas?**")
     
-    now_hw_stress = st.slider("Now HW Stress", 1, 6, 3)
-    inputs['Now-HomeworkStress'] = now_hw_stress
+    # --- TRAINING MODELS ---
+    # 1. Logistic Regression
+    logreg = LogisticRegression(max_iter=2000, random_state=42)
+    logreg.fit(X_train, y_train)
+    y_pred_lr = logreg.predict(X_test)
+    acc_lr = accuracy_score(y_test, y_pred_lr)
     
-    inputs['Now-HomeworkHours'] = st.number_input("Now HW Hours", 0.0, 20.0, 4.0)
+    # 2. Random Forest
+    rf = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
+    rf.fit(X_train, y_train)
+    y_pred_rf = rf.predict(X_test)
+    acc_rf = accuracy_score(y_test, y_pred_rf)
     
-    fam_rel = st.slider("Family Rel.", -3, 3, 0)
-    inputs['FamilyRelationships'] = fam_rel
+    # --- VISUALISASI ---
+    col_mod1, col_mod2 = st.columns(2)
     
-    friend_rel = st.slider("Friend Rel.", -3, 3, 0)
-    inputs['FriendRelationships'] = friend_rel
+    # Helper function plot CM
+    def plot_cm(y_true, y_pred, title):
+        cm = confusion_matrix(y_true, y_pred)
+        fig, ax = plt.subplots(figsize=(3, 2.5))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False, ax=ax)
+        ax.set_title(title, fontsize=10)
+        ax.set_xlabel('Prediksi')
+        ax.set_ylabel('Aktual')
+        return fig
 
-if st.button("🚀 Prediksi Risiko Stres"):
-    # 1. Buat DataFrame
-    input_df = pd.DataFrame([inputs])
+    with col_mod1:
+        st.subheader("A. Logistic Regression")
+        st.metric("Akurasi", f"{acc_lr:.2%}")
+        st.pyplot(plot_cm(y_test, y_pred_lr, "Confusion Matrix (LogReg)"))
+        with st.expander("Lihat Detail Report"):
+            st.text(classification_report(y_test, y_pred_lr))
+            
+    with col_mod2:
+        st.subheader("B. Random Forest")
+        diff = acc_rf - acc_lr
+        st.metric("Akurasi", f"{acc_rf:.2%}", delta=f"{diff:.2%}")
+        st.pyplot(plot_cm(y_test, y_pred_rf, "Confusion Matrix (Random Forest)"))
+        with st.expander("Lihat Detail Report"):
+            st.text(classification_report(y_test, y_pred_rf))
+            
+    st.info("""
+    **Insight:** Perbedaan akurasi terjadi karena Random Forest mampu menangkap hubungan non-linear antar fitur yang gagal ditangkap oleh Logistic Regression.
+    """)
+
+# ==========================================
+# TAB 4: PREDIKSI
+# ==========================================
+with tab4:
+    st.header("Simulasi Prediksi Real-time")
     
-    # 2. FEATURE ENGINEERING (PENTING: Harus sama persis dengan training)
-    input_df['Total_Support_System'] = input_df['FamilyRelationships'] + input_df['FriendRelationships']
-    input_df['Total_Homework_Stress'] = input_df['Before-HomeworkStress'] + input_df['Now-HomeworkStress']
+    # Input Layout
+    c1, c2, c3 = st.columns(3)
+    inputs = {}
     
-    # 3. Encoding
-    try:
+    with c1:
+        st.markdown("### 1. Profil")
+        inputs['Category'] = st.selectbox("Category", encoders['Category'].classes_)
+        inputs['Country'] = st.selectbox("Country", encoders['Country'].classes_)
+        inputs['Gender'] = st.selectbox("Gender", encoders['Gender'].classes_)
+        inputs['Age'] = st.number_input("Age", 10, 30, 20)
+
+    with c2:
+        st.markdown("### 2. Masa Lalu")
+        inputs['Before-Environment'] = st.selectbox("Before Env.", encoders['Before-Environment'].classes_)
+        inputs['Before-ClassworkStress'] = st.slider("Before Class Stress", 1, 6, 3)
+        # Variable temp untuk engineering
+        bf_hw_s = st.slider("Before HW Stress", 1, 6, 3)
+        inputs['Before-HomeworkStress'] = bf_hw_s
+        inputs['Before-HomeworkHours'] = st.number_input("Before HW Hours", 0.0, 20.0, 2.0)
+
+    with c3:
+        st.markdown("### 3. Sekarang")
+        inputs['Now-Environment'] = st.selectbox("Now Env.", encoders['Now-Environment'].classes_)
+        
+        now_hw_s = st.slider("Now HW Stress", 1, 6, 3)
+        inputs['Now-HomeworkStress'] = now_hw_s
+        inputs['Now-HomeworkHours'] = st.number_input("Now HW Hours", 0.0, 20.0, 4.0)
+        
+        fam_rel = st.slider("Family Rel.", -3, 3, 0)
+        inputs['FamilyRelationships'] = fam_rel
+        friend_rel = st.slider("Friend Rel.", -3, 3, 0)
+        inputs['FriendRelationships'] = friend_rel
+        
+    # Pilihan Model
+    model_choice = st.radio("Pilih Model untuk Prediksi:", ["Logistic Regression", "Random Forest"])
+    active_model = logreg if model_choice == "Logistic Regression" else rf
+
+    if st.button("🔍 Analisis Risiko"):
+        # 1. Buat DataFrame
+        input_df = pd.DataFrame([inputs])
+        
+        # 2. FEATURE ENGINEERING (Wajib sama dengan Tab 1)
+        input_df['Total_Support_System'] = input_df['FamilyRelationships'] + input_df['FriendRelationships']
+        input_df['Total_Homework_Stress'] = input_df['Before-HomeworkStress'] + input_df['Now-HomeworkStress']
+        
+        # 3. Encoding
         for col, le in encoders.items():
             if col in input_df.columns:
                 input_df[col] = le.transform(input_df[col].astype(str))
-        
+                
         # 4. Reorder Columns
         input_df = input_df[X.columns]
         
         # 5. Prediksi
-        pred = selected_model.predict(input_df)[0]
-        prob = selected_model.predict_proba(input_df)[0]
+        pred = active_model.predict(input_df)[0]
+        prob = active_model.predict_proba(input_df)[0]
         
-        st.markdown("---")
-        st.write(f"**Menggunakan Model: {model_choice}**")
-        
+        st.divider()
         if pred == 1:
-            st.error(f"⚠️ **Stres TINGGI** (Confidence: {prob[1]:.2%})")
+            st.error("⚠️ **RISIKO TINGGI (High Stress)**")
+            st.write(f"Model ({model_choice}) yakin {prob[1]:.1%} bahwa siswa ini mengalami tekanan tinggi.")
         else:
-            st.success(f"✅ **Stres RENDAH** (Confidence: {prob[0]:.2%})")
-            
-    except Exception as e:
-        st.error(f"Error: {e}")
+            st.success("✅ **RISIKO RENDAH (Low Stress)**")
+            st.write(f"Model ({model_choice}) memprediksi kondisi siswa aman (Confidence: {prob[0]:.1%}).")
